@@ -21,15 +21,15 @@ import (
 	"sort"
 )
 
-// Pair represents an edge in a directed graph
-type Pair struct {
+// Edge represents an edge in a directed graph
+type Edge struct {
 	// identifies indices of the samples at the ends of an edge.
 	Idx1, Idx2 uint64
 	// can be used for any purpose
 	Distance float64
 }
 
-type Edges []Pair
+type Edges []Edge
 
 func (e Edges) Len() int { return len(e) }
 
@@ -55,8 +55,8 @@ func NewChineseWhispers(numIterations uint64) *ChineseWhispers {
 }
 
 // AddEdge adds graph edges
-func (c *ChineseWhispers) AddEdge(pair Pair) {
-	c.edges = append(c.edges, pair)
+func (c *ChineseWhispers) AddEdge(edge Edge) {
+	c.edges = append(c.edges, edge)
 }
 
 func (c *ChineseWhispers) ensureOrdered() {
@@ -65,13 +65,13 @@ func (c *ChineseWhispers) ensureOrdered() {
 	}
 	ordered := make(Edges, len(c.edges)*2)
 	for i := 0; i < len(c.edges); i++ {
-		ordered = append(ordered, Pair{
+		ordered = append(ordered, Edge{
 			Idx1:     c.edges[i].Idx1,
 			Idx2:     c.edges[i].Idx2,
 			Distance: c.edges[i].Distance,
 		})
 		if c.edges[i].Idx1 != c.edges[i].Idx2 {
-			ordered = append(ordered, Pair{
+			ordered = append(ordered, Edge{
 				Idx1:     c.edges[i].Idx2,
 				Idx2:     c.edges[i].Idx1,
 				Distance: c.edges[i].Distance,
@@ -79,10 +79,20 @@ func (c *ChineseWhispers) ensureOrdered() {
 		}
 	}
 	sort.Sort(ordered)
+	var start int
+	for i := 0; i < ordered.Len(); i++ {
+		if ordered[i].Idx1 == 0 && ordered[i].Idx2 == 0 && ordered[i].Distance == 0 {
+			start = i
+		}
+	}
+	if start > 0 {
+		start += 1
+	}
+	c.edges = ordered[start:]
 }
 
 func (c *ChineseWhispers) findNeighbourRanges(neighbours *[][2]uint64) {
-	// setup neighbors so that [neighbors[i][0], neighbors[i][1]) is the range
+	// setup neighbours so that [neighbours[i][0], neighbours[i][1]) is the range
 	// within edges that contains all node i's edges.
 	numNodes := func() uint64 {
 		if len(c.edges) == 0 {
@@ -100,7 +110,7 @@ func (c *ChineseWhispers) findNeighbourRanges(neighbours *[][2]uint64) {
 		return maxIdx + 1
 	}()
 	for i := 0; i < int(numNodes); i++ {
-		(*neighbours) = append((*neighbours), [2]uint64{})
+		(*neighbours) = append((*neighbours), [2]uint64{0, 0})
 	}
 	var curNode, startIdx uint64
 	for i := 0; i < c.edges.Len(); i++ {
@@ -134,8 +144,7 @@ func (c *ChineseWhispers) Run() int {
 		idx := rand.Int63() % int64(len(neighbours))
 		// Count how many times each label happens amongst our neighbors.
 		labelsToCounts := make(map[uint64]float64)
-		end := neighbours[idx][1]
-		for n := neighbours[idx][0]; n != end; n++ {
+		for n := neighbours[idx][0]; n != neighbours[idx][1]; n++ {
 			labelsToCounts[c.labels[c.edges[n].Idx2]] += c.edges[n].Distance
 		}
 		// find the most common label
@@ -149,12 +158,12 @@ func (c *ChineseWhispers) Run() int {
 		}
 		c.labels[idx] = bestLabel
 	}
-	// Remap the labels into a contiguous range.  First we find the
-	// mapping.
+	// Remap the labels into a contiguous range. First we find the mapping.
 	labelRemap := make(map[uint64]uint64)
 	for i := 0; i < len(c.labels); i++ {
-		nextIdx := len(labelRemap)
-		labelRemap[c.labels[i]] = uint64(nextIdx)
+		if _, exists := labelRemap[c.labels[i]]; !exists {
+			labelRemap[c.labels[i]] = uint64(len(labelRemap))
+		}
 	}
 	// now apply the mapping to all the labels.
 	for i := 0; i < len(c.labels); i++ {
